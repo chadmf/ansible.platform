@@ -12,7 +12,7 @@
 ### 1. Clone Repository
 
 ```bash
-git clone <repo-url>
+git clone github.com:chadmf/ansible.platform.git
 cd ansible.platform
 ```
 
