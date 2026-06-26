@@ -16,10 +16,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        arch:
+          - amd64
+          - arm64
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@v3
 
       - name: Log in to Quay.io
         uses: redhat-actions/podman-login@v1
@@ -30,19 +43,19 @@ jobs:
 
       - name: Pre-pull base image from public registry
         run: |
-          podman pull registry.access.redhat.com/ubi8/python-311:latest
+          podman pull --platform ${{ matrix.platform }} registry.access.redhat.com/ubi8/python-311:latest
 
       - name: Extract metadata (tags, labels)
         id: meta
         run: |
-          # Generate tags (newline-separated for buildah-build)
-          TAGS="latest
-          ${GITHUB_SHA::7}"
+          # Generate arch-specific tags
+          TAGS="latest-${{ matrix.arch }}
+          ${GITHUB_SHA::7}-${{ matrix.arch }}"
 
-          # If on devel branch, also tag as devel
+          # If on devel branch, also tag as devel-{arch}
           if [[ "${{ github.ref }}" == "refs/heads/devel" ]]; then
             TAGS="${TAGS}
-          devel"
+          devel-${{ matrix.arch }}"
           fi
 
           echo "tags<<EOF" >> $GITHUB_OUTPUT
@@ -56,6 +69,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           containerfiles: |
             ./Containerfile
           labels: |
@@ -76,6 +90,58 @@ jobs:
       - name: Print image URL
         run: |
           echo "Image pushed to:"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel"
-          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ matrix.arch }}"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel-${{ matrix.arch }}"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}-${{ matrix.arch }}"
+
+  create-manifest:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Log in to Quay.io
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Create and push multi-arch manifests
+        run: |
+          # Create manifest for latest
+          podman manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-amd64
+          podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-arm64
+          podman manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+          # Create manifest for commit SHA
+          podman manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}
+          podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}-amd64
+          podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}-arm64
+          podman manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}
+
+          # Create manifest for devel if on devel branch
+          if [[ "${{ github.ref }}" == "refs/heads/devel" ]]; then
+            podman manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel
+            podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel-amd64
+            podman manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel-arm64
+            podman manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel
+          fi
+
+      - name: Print manifest URLs
+        run: |
+          echo "Multi-arch manifests pushed to:"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest (amd64, arm64)"
+          echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7} (amd64, arm64)"
+          if [[ "${{ github.ref }}" == "refs/heads/devel" ]]; then
+            echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel (amd64, arm64)"
+          fi
