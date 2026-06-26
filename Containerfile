@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build dependencies and packages
 # ==========================================
-FROM registry.redhat.io/ubi8/python-311 AS builder
+FROM registry.access.redhat.com/ubi8/python-311 AS builder
 
 USER root
 WORKDIR /build
@@ -22,7 +22,7 @@ RUN pip install --upgrade pip build && \
 # ==========================================
 # Stage 2: Final Runtime Image
 # ==========================================
-FROM registry.redhat.io/ubi8/python-311
+FROM registry.access.redhat.com/ubi8/python-311
 
 LABEL maintainer="Ansible Platform Team" \
       summary="Model Context Protocol (MCP) server for AI-agent access to AAP Gateway" \

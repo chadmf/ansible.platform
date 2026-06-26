@@ -28,6 +28,10 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
+      - name: Pre-pull base image from public registry
+        run: |
+          podman pull registry.access.redhat.com/ubi8/python-311:latest
+
       - name: Extract metadata (tags, labels)
         id: meta
         run: |
