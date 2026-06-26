@@ -31,16 +31,19 @@ jobs:
       - name: Extract metadata (tags, labels)
         id: meta
         run: |
-          # Generate tags
-          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}"
+          # Generate tags (newline-separated for buildah-build)
+          TAGS="latest
+          ${GITHUB_SHA::7}"
 
           # If on devel branch, also tag as devel
           if [[ "${{ github.ref }}" == "refs/heads/devel" ]]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:devel"
+            TAGS="${TAGS}
+          devel"
           fi
 
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
 
       - name: Build container image
